@@ -31,12 +31,13 @@ export function AIChatWindow({ userId }: { userId: number }) {
       setMsgs((m) => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply }]);
     } catch (err) {
       console.error("채팅 전송 실패", err);
+      const detail = err instanceof Error ? err.message : "알 수 없는 오류";
       setMsgs((m) => [
         ...m,
         {
           id: (Date.now() + 1).toString(),
           role: "ai",
-          text: "죄송해요, 지금 응답을 받아오지 못했어요. 잠시 후 다시 시도해주세요.",
+          text: `⚠️ 응답 실패: ${detail}`,
         },
       ]);
     } finally {
