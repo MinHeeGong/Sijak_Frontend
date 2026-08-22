@@ -2,10 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { MessageCircle, X, Send } from "lucide-react";
 import { clsx } from "clsx";
-import { AI_REPLIES } from "./constants";
+import { sendChatMessage } from "../api/chat";
 import type { ChatMsg } from "./types";
 
-export function AIChatWindow() {
+export function AIChatWindow({ userId }: { userId: number }) {
   const [open, setOpen] = useState(true);
   const [msgs, setMsgs] = useState<ChatMsg[]>([
     { id: "0", role: "ai", text: "안녕하세요! 일정과 할일 관리를 도와드릴게요. 무엇이든 물어보세요 😊" },
@@ -15,20 +15,33 @@ export function AIChatWindow() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, typing]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, typing]);
 
-  const send = () => {
+  const send = async () => {
     if (!input.trim() || typing) return;
     const text = input.trim();
-    setMsgs(m => [...m, { id: Date.now().toString(), role: "user", text }]);
+    setMsgs((m) => [...m, { id: Date.now().toString(), role: "user", text }]);
     setInput("");
     setTyping(true);
-    const delay = 900 + Math.random() * 700;
-    setTimeout(() => {
-      const reply = AI_REPLIES[Math.floor(Math.random() * AI_REPLIES.length)];
-      setMsgs(m => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply }]);
+
+    try {
+      const { reply } = await sendChatMessage(userId, text);
+      setMsgs((m) => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply }]);
+    } catch (err) {
+      console.error("채팅 전송 실패", err);
+      setMsgs((m) => [
+        ...m,
+        {
+          id: (Date.now() + 1).toString(),
+          role: "ai",
+          text: "죄송해요, 지금 응답을 받아오지 못했어요. 잠시 후 다시 시도해주세요.",
+        },
+      ]);
+    } finally {
       setTyping(false);
-    }, delay);
+    }
   };
 
   return (
@@ -64,14 +77,16 @@ export function AIChatWindow() {
             </div>
 
             <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 space-y-2.5">
-              {msgs.map(msg => (
+              {msgs.map((msg) => (
                 <div key={msg.id} className={clsx("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={clsx(
-                    "max-w-[88%] px-3 py-2 rounded-2xl text-xs leading-relaxed",
-                    msg.role === "user"
-                      ? "bg-foreground text-background rounded-br-md"
-                      : "bg-secondary/70 text-foreground/80 rounded-bl-md"
-                  )}>
+                  <div
+                    className={clsx(
+                      "max-w-[88%] px-3 py-2 rounded-2xl text-xs leading-relaxed",
+                      msg.role === "user"
+                        ? "bg-foreground text-background rounded-br-md"
+                        : "bg-secondary/70 text-foreground/80 rounded-bl-md"
+                    )}
+                  >
                     {msg.text}
                   </div>
                 </div>
@@ -80,7 +95,7 @@ export function AIChatWindow() {
                 <div className="flex justify-start">
                   <div className="px-3 py-2.5 bg-secondary/70 rounded-2xl rounded-bl-md">
                     <div className="flex gap-1 items-center">
-                      {[0, 1, 2].map(i => (
+                      {[0, 1, 2].map((i) => (
                         <motion.div
                           key={i}
                           className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40"
@@ -100,8 +115,10 @@ export function AIChatWindow() {
                 <input
                   ref={inputRef}
                   value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") send(); }}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") send();
+                  }}
                   placeholder="일정에 대해 물어보세요..."
                   className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground/30"
                 />
@@ -122,13 +139,18 @@ export function AIChatWindow() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ type: "spring", damping: 26, stiffness: 340 }}
-            onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 350); }}
+            onClick={() => {
+              setOpen(true);
+              setTimeout(() => inputRef.current?.focus(), 350);
+            }}
             className="flex items-center gap-2.5 bg-foreground text-background px-4 py-2.5 rounded-2xl shadow-xl hover:opacity-90 transition-opacity"
           >
             <MessageCircle size={14} />
             <span className="text-xs font-medium">AI와 대화하기</span>
             <div className="w-4 h-4 rounded-full bg-accent flex items-center justify-center">
-              <span className="text-[9px] font-bold text-foreground/70">{msgs.filter(m => m.role === "ai").length}</span>
+              <span className="text-[9px] font-bold text-foreground/70">
+                {msgs.filter((m) => m.role === "ai").length}
+              </span>
             </div>
           </motion.button>
         )}

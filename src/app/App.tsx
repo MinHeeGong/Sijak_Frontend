@@ -134,7 +134,7 @@ export default function App() {
       </div>
 
       {/* ── Floating AI Chat ── */}
-      <AIChatWindow />
+      <AIChatWindow userId={CURRENT_USER_ID} />
     </div>
   );
 }
