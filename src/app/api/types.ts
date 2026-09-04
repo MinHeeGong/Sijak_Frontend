@@ -95,3 +95,26 @@ export interface EventFollowup {
   created_at: string;
   task_title?: string; // /pending 조회 시에만 join되어 내려옴
 }
+
+export interface DailyMemo {
+  id: number;
+  user_id: number;
+  date: string; // 'YYYY-MM-DD'
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserSettings {
+  id: number;
+  user_id: number;
+  assignment_mode: AssignmentMode;
+  timezone: string;
+  priority_trigger_words: string | null;
+  inactivity_days: number;
+  default_deletion_policy: DeletionPolicy;
+  max_habits_per_day: number;
+  color_order: string;
+  created_at: string;
+  updated_at: string;
+}
