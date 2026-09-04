@@ -134,16 +134,14 @@ export function AIChatWindow({ userId, variant = "floating" }: AIChatWindowProps
     setHeight((h) => Math.max(HEIGHT_MIN, Math.min(HEIGHT_MAX, h - deltaY)));
   });
 
-  const send = async () => {
-    if (!input.trim() || typing) return;
-    const text = input.trim();
+  const sendText = async (text: string) => {
+    if (!text.trim() || typing) return;
     setMsgs((m) => [...m, { id: Date.now().toString(), role: "user", text }]);
-    setInput("");
     setTyping(true);
 
     try {
-      const { reply } = await sendChatMessage(userId, text);
-      setMsgs((m) => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply }]);
+      const { reply, choices } = await sendChatMessage(userId, text);
+      setMsgs((m) => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply, choices }]);
     } catch (err) {
       console.error("채팅 전송 실패", err);
       const detail = err instanceof Error ? err.message : "알 수 없는 오류";
@@ -154,6 +152,20 @@ export function AIChatWindow({ userId, variant = "floating" }: AIChatWindowProps
     } finally {
       setTyping(false);
     }
+  };
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    sendText(text);
+  };
+
+  // 선택 버튼 클릭: 그 문구를 그대로 다음 유저 메시지로 보냄 (백엔드 입장에선 일반 대화 turn).
+  // 누른 메시지의 choices는 지워서 버튼이 계속 남아있지 않게 함.
+  const pickChoice = (msgId: string, choice: string) => {
+    setMsgs((m) => m.map((msg) => (msg.id === msgId ? { ...msg, choices: undefined } : msg)));
+    sendText(choice);
   };
 
   const AssignmentToggle = (
@@ -207,7 +219,7 @@ export function AIChatWindow({ userId, variant = "floating" }: AIChatWindowProps
 
       <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 space-y-2.5">
         {msgs.map((msg) => (
-          <div key={msg.id} className={clsx("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
+          <div key={msg.id} className={clsx("flex flex-col", msg.role === "user" ? "items-end" : "items-start")}>
             <div
               className={clsx(
                 "max-w-[88%] px-3 py-2 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap break-words",
@@ -218,6 +230,20 @@ export function AIChatWindow({ userId, variant = "floating" }: AIChatWindowProps
             >
               {msg.text}
             </div>
+            {msg.choices && msg.choices.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5 max-w-[88%]">
+                {msg.choices.map((choice) => (
+                  <button
+                    key={choice}
+                    onClick={() => pickChoice(msg.id, choice)}
+                    disabled={typing}
+                    className="text-[11px] px-2.5 py-1.5 rounded-xl border border-border/40 bg-card hover:bg-accent/20 hover:border-accent/50 transition-colors disabled:opacity-40"
+                  >
+                    {choice}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {typing && (

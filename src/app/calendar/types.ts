@@ -24,4 +24,5 @@ export interface ChatMsg {
   id: string;
   role: "user" | "ai";
   text: string;
+  choices?: string[]; // present_choices로 온 경우에만 존재. 유저가 고르면 사라짐.
 }
