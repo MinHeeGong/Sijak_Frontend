@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import { getTasks, createTask, updateTask } from "../api/tasks";
 import { getCategories, ensureUnclassifiedCategory } from "../api/categories";
 import type { Task, Category } from "../api/types";
+import { ExpiryBadge } from "../components/ExpiryBadge";
 
 function TodoRow({
   task,
@@ -33,6 +34,7 @@ function TodoRow({
       >
         {task.title}
       </span>
+      {!done && <ExpiryBadge expiresAt={task.expires_at} />}
       <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 opacity-40" style={{ backgroundColor: color }} />
     </div>
   );

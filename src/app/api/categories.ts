@@ -1,5 +1,5 @@
 // src/api/categories.ts
-import { apiGet, apiPost, apiPut, apiDelete } from './client';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from './client';
 import type { Category } from './types';
 
 // schema.sql의 user_settings.color_order 기본값과 동일 (헤이즈님이 지정한 6색 팔레트)
@@ -38,6 +38,11 @@ export function updateCategory(
 
 export function deleteCategory(categoryId: number) {
   return apiDelete<{ id: number; deleted: true }>(`/categories/${categoryId}`);
+}
+
+// 마인드맵뷰: 라쏘로 여러 카테고리 노드를 선택한 뒤 부모를 한 번에 바꿀 때 사용
+export function bulkUpdateCategoryParent(categoryIds: number[], parentId: number | null) {
+  return apiPatch<Category[]>('/categories/bulk', { category_ids: categoryIds, parent_id: parentId });
 }
 
 // 카테고리 선택 없이 빠르게 task를 추가하는 화면(TodoSidebar 등)에서 사용.
