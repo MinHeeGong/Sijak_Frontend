@@ -8,6 +8,7 @@ import { getSchedules, rescheduleTask, createSchedule } from "../api/schedules";
 import { getTasks, createTask } from "../api/tasks";
 import { getCategories } from "../api/categories";
 import type { Schedule, Task, Category } from "../api/types";
+import { onDataChanged } from "../lib/dataEvents";
 
 // 렌더링용 view model: schedules(시간) + tasks(제목) + categories(색) 조인 결과.
 // taskTop/taskH 등 기존 유틸은 {hour, min, duration}을 기대하므로 로컬 시간으로 풀어서 담습니다.
@@ -56,7 +57,7 @@ export function DailyTimeline({
     : null;
 
   // 카테고리 + task 목록은 유저 단위로 한 번 불러와서 캐싱 (조인용)
-  useEffect(() => {
+  const refetchCategoriesAndTasks = () => {
     getCategories(userId)
       .then((cats) => setCategoriesById(Object.fromEntries(cats.map((c) => [c.id, c]))))
       .catch((err) => console.error("카테고리 로드 실패", err));
@@ -64,14 +65,23 @@ export function DailyTimeline({
     getTasks(userId)
       .then((tasks) => setTasksById(Object.fromEntries(tasks.map((t) => [t.id, t]))))
       .catch((err) => console.error("task 로드 실패", err));
-  }, [userId]);
+  };
+  useEffect(refetchCategoriesAndTasks, [userId]);
 
   // 날짜가 바뀔 때마다 그날의 schedules만 다시 조회
-  useEffect(() => {
+  const refetchSchedules = () => {
     getSchedules(userId, dateStr)
       .then(setSchedules)
       .catch((err) => console.error("일정 로드 실패", err));
-  }, [userId, dateStr]);
+  };
+  useEffect(refetchSchedules, [userId, dateStr]);
+
+  // AI 채팅에서 일정을 추가/변경했을 수도 있으니 신호가 오면 통째로 다시 불러옴
+  // ("AI는 추가했다는데 화면엔 안 보임" 버그의 핵심 원인이었던 부분)
+  useEffect(() => onDataChanged(() => {
+    refetchCategoriesAndTasks();
+    refetchSchedules();
+  }), [userId, dateStr]);
 
   // Drag-to-reschedule: 마우스무브 중엔 로컬 미리보기만, mouseup에 한 번만 서버 반영
   const dragInfoRef = useRef<{
@@ -138,6 +148,96 @@ export function DailyTimeline({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draggingId, dragPreview, date]);
+
+  // Drag-to-resize: 일정 블록 위/아래 가장자리를 끌어서 시작/끝 시간을 조정.
+  // drag-to-move와 같은 패턴(ref로 시작값 저장, mousemove는 미리보기만, mouseup에 한 번 서버 반영)
+  // 이지만 별도 state로 관리 - 이동과 리사이즈가 동시에 발생할 일은 없어서 안전.
+  const resizeInfoRef = useRef<{
+    scheduleId: number;
+    edge: "top" | "bottom";
+    startClientY: number;
+    origStartMin: number; // 자정 기준 분 (hour*60+min)
+    origDuration: number;
+  } | null>(null);
+  const [resizingId, setResizingId] = useState<number | null>(null);
+  const [resizePreview, setResizePreview] = useState<{ startMin: number; duration: number } | null>(null);
+  const MIN_DURATION = 15;
+
+  useEffect(() => {
+    if (!resizingId) return;
+
+    const onMove = (e: MouseEvent) => {
+      const info = resizeInfoRef.current;
+      if (!info) return;
+      const deltaY = e.clientY - info.startClientY;
+      const rawDeltaMin = (deltaY / HOUR_PX) * 60;
+      const snapped = Math.round(rawDeltaMin / 15) * 15;
+
+      if (info.edge === "top") {
+        // 위쪽을 끌면 시작 시간만 바뀌고 끝나는 시간은 고정
+        let newStart = info.origStartMin + snapped;
+        newStart = Math.min(newStart, info.origStartMin + info.origDuration - MIN_DURATION);
+        newStart = Math.max(newStart, DAY_START * 60);
+        setResizePreview({ startMin: newStart, duration: info.origStartMin + info.origDuration - newStart });
+      } else {
+        // 아래쪽을 끌면 끝나는 시간만 바뀌고 시작 시간은 고정
+        let newEnd = info.origStartMin + info.origDuration + snapped;
+        newEnd = Math.max(newEnd, info.origStartMin + MIN_DURATION);
+        newEnd = Math.min(newEnd, DAY_END * 60);
+        setResizePreview({ startMin: info.origStartMin, duration: newEnd - info.origStartMin });
+      }
+    };
+
+    const onUp = async () => {
+      const info = resizeInfoRef.current;
+      const preview = resizePreview;
+      resizeInfoRef.current = null;
+      setResizingId(null);
+
+      if (!info || !preview) {
+        setResizePreview(null);
+        return;
+      }
+
+      const newStart = new Date(date);
+      newStart.setHours(Math.floor(preview.startMin / 60), preview.startMin % 60, 0, 0);
+      const newEnd = new Date(newStart.getTime() + preview.duration * 60 * 1000);
+
+      try {
+        const updated = await rescheduleTask(info.scheduleId, {
+          start_at: newStart.toISOString(),
+          end_at: newEnd.toISOString(),
+        });
+        setSchedules((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      } catch (err) {
+        console.error("리사이즈 실패", err);
+      } finally {
+        setResizePreview(null);
+      }
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resizingId, resizePreview, date]);
+
+  const onResizeMouseDown = (e: React.MouseEvent, view: ScheduledTaskView, edge: "top" | "bottom") => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeInfoRef.current = {
+      scheduleId: view.scheduleId,
+      edge,
+      startClientY: e.clientY,
+      origStartMin: view.hour * 60 + view.min,
+      origDuration: view.duration,
+    };
+    setResizingId(view.scheduleId);
+    setResizePreview({ startMin: view.hour * 60 + view.min, duration: view.duration });
+  };
 
   const onTaskMouseDown = (e: React.MouseEvent, view: ScheduledTaskView) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -214,8 +314,11 @@ export function DailyTimeline({
         const category = categoriesById[task.category_id];
 
         const isDraggingThis = draggingId === s.id && dragPreview;
+        const isResizingThis = resizingId === s.id && resizePreview;
         const { hour, min, duration } = isDraggingThis
           ? { ...dragPreview!, duration: taskDurationMinutes(s) }
+          : isResizingThis
+          ? { hour: Math.floor(resizePreview!.startMin / 60), min: resizePreview!.startMin % 60, duration: resizePreview!.duration }
           : utcToLocalParts(s.start_at, s.end_at);
 
         return {
@@ -229,7 +332,7 @@ export function DailyTimeline({
         };
       })
       .filter((v): v is ScheduledTaskView => v !== null);
-  }, [schedules, tasksById, categoriesById, draggingId, dragPreview]);
+  }, [schedules, tasksById, categoriesById, draggingId, dragPreview, resizingId, resizePreview]);
 
   function taskDurationMinutes(s: Schedule) {
     return Math.round((new Date(s.end_at).getTime() - new Date(s.start_at).getTime()) / (60 * 1000));
@@ -327,6 +430,7 @@ export function DailyTimeline({
             const height = taskH(view);
             const isHovered = hoverTaskId === view.taskId;
             const isDragging = draggingId === view.scheduleId;
+            const isResizing = resizingId === view.scheduleId;
 
             return (
               <div
@@ -340,8 +444,8 @@ export function DailyTimeline({
                   right: "10px",
                   backgroundColor: view.color,
                   borderLeft: `3px solid ${view.color}`,
-                  zIndex: isDragging ? 25 : isHovered ? 15 : 8,
-                  boxShadow: isDragging ? "0 6px 18px rgba(0,0,0,0.12)" : undefined,
+                  zIndex: isDragging || isResizing ? 25 : isHovered ? 15 : 8,
+                  boxShadow: isDragging || isResizing ? "0 6px 18px rgba(0,0,0,0.12)" : undefined,
                   cursor: isDragging ? "grabbing" : "grab",
                 }}
                 className="rounded-r-xl px-2.5 py-1.5 hover:brightness-[0.97] transition-[filter] overflow-hidden"
@@ -350,6 +454,18 @@ export function DailyTimeline({
                 onMouseLeave={() => setHoverTaskId(null)}
                 onClick={(e) => e.stopPropagation()}
               >
+                {/* 위/아래 가장자리 리사이즈 핸들: 끌면 시작/끝 시간이 유동적으로 늘어나거나 줄어듦 */}
+                <div
+                  data-task="true"
+                  onMouseDown={(e) => onResizeMouseDown(e, view, "top")}
+                  style={{ position: "absolute", top: 0, left: 0, right: 0, height: "6px", cursor: "ns-resize", zIndex: 30 }}
+                />
+                <div
+                  data-task="true"
+                  onMouseDown={(e) => onResizeMouseDown(e, view, "bottom")}
+                  style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "6px", cursor: "ns-resize", zIndex: 30 }}
+                />
+
                 <p className="text-[11px] font-semibold leading-tight truncate text-foreground">
                   {view.title}
                 </p>
@@ -359,7 +475,7 @@ export function DailyTimeline({
                   </p>
                 )}
 
-                {isHovered && !draggingId && (
+                {isHovered && !draggingId && !resizingId && (
                   <>
                     <button
                       data-task="true"

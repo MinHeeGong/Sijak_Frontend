@@ -8,6 +8,7 @@ import { getTasks, createTask } from "../api/tasks";
 import { getCategories } from "../api/categories";
 import type { Schedule, Task, Category } from "../api/types";
 import { AddTaskModal, type AddTaskPayload } from "./AddTaskModal";
+import { onDataChanged } from "../lib/dataEvents";
 
 interface ScheduledTaskView {
   scheduleId: number;
@@ -92,7 +93,7 @@ export function WeeklyGrid({
     }
   };
 
-  useEffect(() => {
+  const refetchCategoriesAndTasks = () => {
     getCategories(userId)
       .then((cats) => setCategoriesById(Object.fromEntries(cats.map((c) => [c.id, c]))))
       .catch((err) => console.error("카테고리 로드 실패", err));
@@ -100,16 +101,24 @@ export function WeeklyGrid({
     getTasks(userId)
       .then((tasks) => setTasksById(Object.fromEntries(tasks.map((t) => [t.id, t]))))
       .catch((err) => console.error("task 로드 실패", err));
-  }, [userId]);
+  };
+  useEffect(refetchCategoriesAndTasks, [userId]);
 
   // 주 단위 range 쿼리가 아직 백엔드에 없어서, 유저의 전체 schedules를 받아
   // local_date가 이번 주(weekStart~+6일) 안에 있는 것만 클라이언트에서 걸러냅니다.
   // (개인용 MVP 규모라 성능 문제 없음. 나중에 데이터 많아지면 /schedules?from=&to= 추가 권장)
-  useEffect(() => {
+  const refetchSchedules = () => {
     getSchedules(userId)
       .then(setSchedules)
       .catch((err) => console.error("일정 로드 실패", err));
-  }, [userId]);
+  };
+  useEffect(refetchSchedules, [userId]);
+
+  // AI 채팅에서 일정을 추가/변경했을 수도 있으니 신호가 오면 통째로 다시 불러옴
+  useEffect(() => onDataChanged(() => {
+    refetchCategoriesAndTasks();
+    refetchSchedules();
+  }), [userId]);
 
   const weekDateStrs = useMemo(() => weekDays.map((d) => format(d, "yyyy-MM-dd")), [weekDays]);
 

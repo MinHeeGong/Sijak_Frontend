@@ -6,6 +6,7 @@ import { getTasks, createTask, updateTask } from "../api/tasks";
 import { getCategories, ensureUnclassifiedCategory } from "../api/categories";
 import type { Task, Category } from "../api/types";
 import { ExpiryBadge } from "../components/ExpiryBadge";
+import { onDataChanged } from "../lib/dataEvents";
 
 function TodoRow({
   task,
@@ -52,10 +53,12 @@ export function TodoSidebar({ userId }: { userId: number }) {
     if (adding) inputRef.current?.focus();
   }, [adding]);
 
-  useEffect(() => {
+  const refetch = () => {
     getTasks(userId).then(setTasks).catch((err) => console.error("task 로드 실패", err));
     getCategories(userId).then(setCategories).catch((err) => console.error("카테고리 로드 실패", err));
-  }, [userId]);
+  };
+  useEffect(refetch, [userId]);
+  useEffect(() => onDataChanged(refetch), [userId]);
 
   const categoriesById = Object.fromEntries(categories.map((c) => [c.id, c]));
 

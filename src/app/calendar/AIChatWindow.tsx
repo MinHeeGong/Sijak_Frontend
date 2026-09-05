@@ -4,11 +4,12 @@ import { MessageCircle, X, Send } from "lucide-react";
 import { clsx } from "clsx";
 import { sendChatMessage } from "../api/chat";
 import { getUserSettings, updateAssignmentMode } from "../api/userSettings";
+import { emitDataChanged } from "../lib/dataEvents";
 import type { ChatMsg } from "./types";
 import type { AssignmentMode } from "../api/types";
 
 const DEFAULT_WIDTH = 512;
-const DEFAULT_HEIGHT = 710;
+const DEFAULT_HEIGHT = 510;
 const WIDTH_MIN = 340;
 const WIDTH_MAX = 800;
 const HEIGHT_MIN = 420;
@@ -142,6 +143,9 @@ export function AIChatWindow({ userId, variant = "floating" }: AIChatWindowProps
     try {
       const { reply, choices } = await sendChatMessage(userId, text);
       setMsgs((m) => [...m, { id: (Date.now() + 1).toString(), role: "ai", text: reply, choices }]);
+      // AI가 schedule_task/add_task 등을 호출했을 수 있으니, 다른 화면(일간/주간/월간/카테고리)에
+      // "혹시 모르니 다시 불러와" 신호를 보냄. 매번 쏴도 그냥 GET 몇 번 더 도는 정도라 무해함.
+      emitDataChanged();
     } catch (err) {
       console.error("채팅 전송 실패", err);
       const detail = err instanceof Error ? err.message : "알 수 없는 오류";

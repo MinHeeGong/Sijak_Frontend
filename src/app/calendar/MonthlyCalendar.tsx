@@ -13,6 +13,7 @@ import { getTasks } from "../api/tasks";
 import { getCategories } from "../api/categories";
 import { getDailyMemos, saveDailyMemo } from "../api/dailyMemos";
 import type { Schedule, Task, Category, DailyMemo } from "../api/types";
+import { onDataChanged } from "../lib/dataEvents";
 
 const MIN_DETAIL_W = 176;
 const MAX_DETAIL_W = 360;
@@ -73,7 +74,7 @@ export function MonthlyCalendar({ userId }: { userId: number }) {
   const calEnd = endOfWeek(endOfMonth(month), { weekStartsOn: 1 });
   const calDays = eachDayOfInterval({ start: calStart, end: calEnd });
 
-  useEffect(() => {
+  const refetchCategoriesAndTasks = () => {
     getCategories(userId)
       .then((cats) => setCategoriesById(Object.fromEntries(cats.map((c) => [c.id, c]))))
       .catch((err) => console.error("카테고리 로드 실패", err));
@@ -81,24 +82,35 @@ export function MonthlyCalendar({ userId }: { userId: number }) {
     getTasks(userId)
       .then((tasks) => setTasksById(Object.fromEntries(tasks.map((t) => [t.id, t]))))
       .catch((err) => console.error("task 로드 실패", err));
-  }, [userId]);
+  };
+  useEffect(refetchCategoriesAndTasks, [userId]);
 
   // 월간 range 쿼리가 아직 백엔드에 없어서, 유저의 전체 schedules를 받아
   // local_date가 이번에 보이는 달력 범위(calStart~calEnd) 안에 있는 것만 걸러냅니다.
-  useEffect(() => {
+  const refetchSchedules = () => {
     getSchedules(userId)
       .then(setSchedules)
       .catch((err) => console.error("일정 로드 실패", err));
-  }, [userId, month]);
+  };
+  useEffect(refetchSchedules, [userId, month]);
 
-  useEffect(() => {
+  const refetchMemos = () => {
     const startStr = format(calStart, "yyyy-MM-dd");
     const endStr = format(calEnd, "yyyy-MM-dd");
     getDailyMemos(userId, startStr, endStr)
       .then((memos) => setMemosByDate(Object.fromEntries(memos.map((m) => [m.date, m]))))
       .catch((err) => console.error("메모 로드 실패", err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, month]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(refetchMemos, [userId, month]);
+
+  // AI 채팅에서 일정/task를 추가·변경했을 수도 있으니 신호가 오면 통째로 다시 불러옴
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onDataChanged(() => {
+    refetchCategoriesAndTasks();
+    refetchSchedules();
+    refetchMemos();
+  }), [userId, month]);
 
   useEffect(() => {
     setMemoEditing(false);
