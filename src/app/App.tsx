@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ChevronLeft, ChevronRight, CalendarDays, LayoutGrid, Target, FolderTree, MessageCircle,
 } from "lucide-react";
@@ -16,9 +16,9 @@ import { ResizeHandle } from "./calendar/ResizeHandle";
 import { useDragResize } from "./calendar/useDragResize";
 import { useIsMobile } from "./components/ui/use-mobile";
 import { TODAY } from "./calendar/constants";
-
-// TODO: 로그인 기능 만들기 전까지 1번 유저로 고정 (개인용 MVP라 문제 없음)
-const CURRENT_USER_ID = 1;
+import { getMe, type AuthUser } from "./api/auth";
+import { LoginPage, setLastLoginProvider } from "./auth/LoginPage";
+import { OnboardingFlow } from "./auth/OnboardingFlow";
 
 type Tab = "schedule" | "monthly" | "priority" | "category" | "chat";
 
@@ -27,7 +27,8 @@ const SIDEBAR_MAX = 400;
 const DAILY_MIN = 320;
 const DAILY_MAX = 640;
 
-export default function App() {
+// 실제 앱 화면 전체 - 로그인 완료 + 온보딩 완료 후에만 렌더링됨 (아래 App()이 그 게이트 역할)
+function AppShell({ userId }: { userId: number }) {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<Tab>("schedule");
   const [sidebarW, setSidebarW] = useState(252);
@@ -93,17 +94,17 @@ export default function App() {
             // 각각 세로 스크롤하도록 함 (일간 먼저, 그 아래 주간).
             <div className="h-full flex flex-col gap-2.5 overflow-y-auto">
               <div className="h-[70vh] flex-shrink-0">
-                <DailyTimeline userId={CURRENT_USER_ID} date={selectedDate} onChangeDate={setSelectedDate} />
+                <DailyTimeline userId={userId} date={selectedDate} onChangeDate={setSelectedDate} />
               </div>
               <div className="h-[70vh] flex-shrink-0">
-                <WeeklyGrid userId={CURRENT_USER_ID} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+                <WeeklyGrid userId={userId} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
               </div>
             </div>
           )}
-          {tab === "monthly" && <MonthlyCalendar userId={CURRENT_USER_ID} />}
-          {tab === "priority" && <PriorityMatrix userId={CURRENT_USER_ID} />}
-          {tab === "category" && <CategoryView userId={CURRENT_USER_ID} />}
-          {tab === "chat" && <AIChatWindow userId={CURRENT_USER_ID} variant="docked" />}
+          {tab === "monthly" && <MonthlyCalendar userId={userId} />}
+          {tab === "priority" && <PriorityMatrix userId={userId} />}
+          {tab === "category" && <CategoryView userId={userId} />}
+          {tab === "chat" && <AIChatWindow userId={userId} variant="docked" />}
         </main>
 
         {/* 하단 네비게이션 */}
@@ -145,7 +146,7 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-hidden">
-          <TodoSidebar userId={CURRENT_USER_ID} />
+          <TodoSidebar userId={userId} />
         </div>
       </div>
 
@@ -202,22 +203,80 @@ export default function App() {
           {tab === "schedule" && (
             <div className="h-full flex">
               <div style={{ width: `${dailyW}px` }} className="flex-shrink-0 h-full">
-                <DailyTimeline userId={CURRENT_USER_ID} date={selectedDate} onChangeDate={setSelectedDate} />
+                <DailyTimeline userId={userId} date={selectedDate} onChangeDate={setSelectedDate} />
               </div>
               <ResizeHandle onMouseDown={startDailyResize} />
               <div className="flex-1 min-w-0 h-full">
-                <WeeklyGrid userId={CURRENT_USER_ID} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+                <WeeklyGrid userId={userId} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
               </div>
             </div>
           )}
-          {tab === "monthly" && <MonthlyCalendar userId={CURRENT_USER_ID} />}
-          {tab === "priority" && <PriorityMatrix userId={CURRENT_USER_ID} />}
-          {tab === "category" && <CategoryView userId={CURRENT_USER_ID} />}
+          {tab === "monthly" && <MonthlyCalendar userId={userId} />}
+          {tab === "priority" && <PriorityMatrix userId={userId} />}
+          {tab === "category" && <CategoryView userId={userId} />}
         </main>
       </div>
 
       {/* ── Floating AI Chat ── */}
-      <AIChatWindow userId={CURRENT_USER_ID} />
+      <AIChatWindow userId={userId} />
     </div>
   );
+}
+
+// ── 인증 게이트: 로딩 -> (미로그인) 로그인 페이지 -> (온보딩 미완료) 온보딩 -> 본 앱 ──
+type GateState =
+  | { status: "loading" }
+  | { status: "loggedOut" }
+  | { status: "onboarding"; user: AuthUser }
+  | { status: "ready"; user: AuthUser };
+
+export default function App() {
+  const [gate, setGate] = useState<GateState>({ status: "loading" });
+
+  useEffect(() => {
+    // OAuth 콜백이 성공하면 백엔드가 ?login_provider=xxx를 붙여서 리다이렉트해줌.
+    // 여기서 읽어서 "지난번 로그인 방식" 배지용으로 저장하고 주소창에서는 지워버림.
+    const params = new URLSearchParams(window.location.search);
+    const provider = params.get("login_provider");
+    if (provider === "google" || provider === "kakao" || provider === "naver") {
+      setLastLoginProvider(provider);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    getMe()
+      .then((res) => {
+        if (!res) {
+          setGate({ status: "loggedOut" });
+        } else if (!res.settings.onboarding_completed) {
+          setGate({ status: "onboarding", user: res.user });
+        } else {
+          setGate({ status: "ready", user: res.user });
+        }
+      })
+      .catch((err) => {
+        console.error("/auth/me 확인 실패", err);
+        setGate({ status: "loggedOut" });
+      });
+  }, []);
+
+  if (gate.status === "loading") {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-muted/20">
+        <div className="w-6 h-6 rounded-full border-2 border-foreground/20 border-t-foreground animate-spin" />
+      </div>
+    );
+  }
+
+  if (gate.status === "loggedOut") return <LoginPage />;
+
+  if (gate.status === "onboarding") {
+    return (
+      <OnboardingFlow
+        userId={gate.user.id}
+        onDone={() => setGate({ status: "ready", user: gate.user })}
+      />
+    );
+  }
+
+  return <AppShell userId={gate.user.id} />;
 }
