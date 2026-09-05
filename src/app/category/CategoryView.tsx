@@ -12,6 +12,7 @@ import { getTasks } from "../api/tasks";
 import type { Category, Project, Task } from "../api/types";
 import { FolderView } from "./FolderView";
 import { MindmapView } from "./MindmapView";
+import { onDataChanged } from "../lib/dataEvents";
 
 type ViewMode = "folder" | "mindmap";
 const STORAGE_KEY = "sijak:category-view-mode";
@@ -33,6 +34,9 @@ export function CategoryView({ userId }: { userId: number }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // AI 채팅에서 카테고리/task를 추가·변경했을 수도 있으니 신호가 오면 다시 불러옴
+  useEffect(() => onDataChanged(refresh), [refresh]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, mode);
