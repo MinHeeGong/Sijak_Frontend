@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { format, startOfWeek, addDays, isSameDay, isToday } from "date-fns";
 import { clsx } from "clsx";
-import { HOURS, HOUR_PX, DAY_START } from "./constants";
+import { HOURS, HOUR_PX, DAY_START, DAY_END } from "./constants";
 import { taskTop, taskH, hourLabel } from "./utils";
-import { getSchedules } from "../api/schedules";
-import { getTasks } from "../api/tasks";
+import { getSchedules, createSchedule } from "../api/schedules";
+import { getTasks, createTask } from "../api/tasks";
 import { getCategories } from "../api/categories";
 import type { Schedule, Task, Category } from "../api/types";
+import { AddTaskModal, type AddTaskPayload } from "./AddTaskModal";
 
 interface ScheduledTaskView {
   scheduleId: number;
@@ -40,10 +41,56 @@ export function WeeklyGrid({
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [tasksById, setTasksById] = useState<Record<number, Task>>({});
   const [categoriesById, setCategoriesById] = useState<Record<number, Category>>({});
+  const [addAt, setAddAt] = useState<{ day: Date; hour: number; min: number } | null>(null);
+  const colRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const now = new Date();
+
+  // DailyTimeline의 yToTime과 동일한 로직 (y좌표 -> 15분 단위로 스냅된 시:분)
+  const yToTime = (y: number) => {
+    const totalMins = (y / HOUR_PX) * 60;
+    const h = Math.floor(totalMins / 60) + DAY_START;
+    const m = Math.round((totalMins % 60) / 15) * 15;
+    return { hour: Math.max(DAY_START, Math.min(DAY_END - 1, h)), min: m >= 60 ? 0 : m };
+  };
+
+  const handleColumnClick = (e: React.MouseEvent, day: Date, col: number) => {
+    if ((e.target as HTMLElement).closest("[data-task]")) return; // 기존 일정 클릭은 무시
+    const el = colRefs.current[col];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    onSelectDate(day);
+    setAddAt({ day, ...yToTime(y) });
+  };
+
+  // 새 task 추가: DailyTimeline과 동일한 패턴 (task 생성 -> schedule 생성 순차 호출)
+  const handleAdd = async (payload: AddTaskPayload) => {
+    if (payload.category_id == null) {
+      alert("카테고리를 선택해주세요. AI 자동 분류는 대화창에서 이용할 수 있어요.");
+      return;
+    }
+    try {
+      const task = await createTask({
+        user_id: userId,
+        category_id: payload.category_id,
+        title: payload.title,
+      });
+      const schedule = await createSchedule({
+        task_id: task.id,
+        start_at: payload.start_at,
+        end_at: payload.end_at,
+      });
+      setTasksById((prev) => ({ ...prev, [task.id]: task }));
+      setSchedules((prev) => [...prev, schedule]);
+      setAddAt(null);
+    } catch (err) {
+      console.error("task 추가 실패", err);
+      alert("추가에 실패했어요. 다시 시도해주세요.");
+    }
+  };
 
   useEffect(() => {
     getCategories(userId)
@@ -91,7 +138,7 @@ export function WeeklyGrid({
   }, [schedules, tasksById, categoriesById, weekDateStrs]);
 
   return (
-    <div className="flex flex-col h-full bg-card rounded-2xl border border-border/40 overflow-hidden">
+    <div className="relative flex flex-col h-full bg-card rounded-2xl border border-border/40 overflow-hidden">
       {/* Day headers */}
       <div
         className="flex-shrink-0 border-b border-border/20"
@@ -168,8 +215,9 @@ export function WeeklyGrid({
             return (
               <div
                 key={col}
+                ref={(el) => (colRefs.current[col] = el)}
                 className={clsx("relative border-l border-border/15", isSel && "bg-accent/[0.07]")}
-                onClick={() => onSelectDate(day)}
+                onClick={(e) => handleColumnClick(e, day, col)}
               >
                 {HOURS.map((h) => (
                   <div
@@ -190,6 +238,7 @@ export function WeeklyGrid({
                   return (
                     <div
                       key={view.scheduleId}
+                      data-task
                       style={{
                         position: "absolute",
                         top: `${top}px`,
@@ -211,6 +260,18 @@ export function WeeklyGrid({
           })}
         </div>
       </div>
+
+      {addAt && (
+        <AddTaskModal
+          userId={userId}
+          baseDate={addAt.day}
+          dayOffset={0}
+          defaultHour={addAt.hour}
+          defaultMin={addAt.min}
+          onAdd={handleAdd}
+          onClose={() => setAddAt(null)}
+        />
+      )}
     </div>
   );
 }
