@@ -2,7 +2,7 @@
 // 백엔드가 항상 { success: true, data } 또는 { success: false, error } 형태로 응답하므로
 // (개발 가이드라인 2번 규칙), 여기서 한 번에 풀어서 각 리소스 파일은 얇게 유지합니다.
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 
 interface ApiSuccess<T> {
   success: true;
@@ -22,6 +22,7 @@ async function request<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // 로그인 쿠키(sijak_token)를 매 요청에 실어 보내기 위해 필수
     ...options,
   });
 
